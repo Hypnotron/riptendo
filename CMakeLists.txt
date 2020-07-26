@@ -1,0 +1,18 @@
+cmake_minimum_required(VERSION 3.8.2)
+
+project(riptendo
+        VERSION 0.0.1
+        LANGUAGES CXX)
+
+add_executable(riptendo
+        main.cpp)
+target_compile_features(riptendo
+        PUBLIC cxx_std_11)
+set_target_properties(riptendo PROPERTIES
+        CXX_EXTENSIONS OFF)
+
+install(
+        TARGETS riptendo
+        RUNTIME
+        DESTINATION /usr/bin
+        CONFIGURATIONS Debug Release)
