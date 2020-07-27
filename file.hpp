@@ -33,8 +33,8 @@ class File {
                     buffer.size());
         }
 
-        virtual void toWav(File& dest) const = 0;
-        virtual void fromWav(const File& source) = 0;
+        virtual std::string toWav(File& dest) const = 0;
+        virtual std::string fromWav(const File& source) = 0;
 
         virtual ~File() {}
 };

@@ -10,7 +10,7 @@ class WavFile : public File {
               : File(filename) {
         }
 
-        void toWav(File& dest) const override {
+        std::string toWav(File& dest) const override {
             size_t offset {dest.start};
             for (
                     auto byte {buffer.begin() + start};
@@ -18,8 +18,9 @@ class WavFile : public File {
                     ++byte) {
                 dest.buffer[offset++] = *byte;
             }
+            return "";
         }
-        void fromWav(const File& source) override {
+        std::string fromWav(const File& source) override {
             size_t offset {start};
             for (
                     auto byte {source.buffer.begin() + source.start};
@@ -27,5 +28,6 @@ class WavFile : public File {
                     ++byte) {
                 buffer[offset++] = *byte;
             }
+            return "";
         }
 };

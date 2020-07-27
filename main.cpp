@@ -52,10 +52,10 @@ int main(int argc, char* argv[]) {
 
     //Perform conversion and flush:
     if (decoding) {
-        nintendoFile->toWav(*wavFile);
+        std::cerr << nintendoFile->toWav(*wavFile);
     }
     else {
-        nintendoFile->fromWav(*wavFile);
+        std::cerr << nintendoFile->fromWav(*wavFile);
     }
     outputFile->flush();
 
