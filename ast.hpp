@@ -32,7 +32,30 @@ class AstFile : public File {
                     sampleCount * (bitDepth / 8) * channelCount
                   + 0x2C);
             std::vector<u8>::iterator output {
-                    dest.buffer.begin() + dest.start + 0x2C};
+                    dest.buffer.begin() + dest.start};
+            //                                       R I F F
+            writeBytes<4, Endianness::BIG>(output, 0x52494646); output += 4;
+            writeBytes<4>(output, dest.buffer.size() - 8);      output += 4;
+            //                                       W A V E
+            writeBytes<4, Endianness::BIG>(output, 0x57415645); output += 4;
+            //                                       f m t <space>
+            writeBytes<4, Endianness::BIG>(output, 0x666D7420); output += 4; 
+            //Subchunk 1 size (always 16 for LPCM):
+            writeBytes<4>(output, 16);                          output += 4;
+            //Audio format (always 1 for LPCM):
+            writeBytes<2>(output, 1);                           output += 2;
+            writeBytes<2>(output, channelCount);                output += 2;
+            writeBytes<4>(output, sampleRate);                  output += 4;
+            writeBytes<4>(output, 
+                    sampleRate 
+                  * (bitDepth / 8) 
+                  * channelCount);                              output += 4;
+            writeBytes<2>(output,
+                    (bitDepth / 8) * channelCount);             output += 2;
+            writeBytes<2>(output, bitDepth);                    output += 2;
+            //                                       d a t a
+            writeBytes<4, Endianness::BIG>(output, 0x64617461); output += 4;
+            writeBytes<4>(output, dest.buffer.size() - 0x2C);   output += 4;
 
             std::vector<s16> history1(channelCount, 0);
             std::vector<s16> history2(channelCount, 0);
