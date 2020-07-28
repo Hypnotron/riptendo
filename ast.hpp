@@ -15,10 +15,16 @@ class AstFile : public File {
         }
 
         std::string toWav(File& dest) const override {
-            if (start + 0x40 > end) {
-                return "Missing AST header (out of space)!\n";
-            }
+            std::string message {""};
 
+            if (start + 0x40 > end) {
+                message += "ERROR (out of space): Missing AST header!\n";
+                return message;
+            }
+            const u32 strmMagic {readBytes<4, u32, Endianness::BIG>(
+                    buffer.begin() + start)};
+            const u32 dataSize {readBytes<4, u32, Endianness::BIG>(
+                    buffer.begin() + start + 0x04)};
             const bool isPcm = readBytes<2, u16, Endianness::BIG>(
                     buffer.begin() + start + 0x08); 
             const u16 bitDepth {readBytes<2, u16, Endianness::BIG>(
@@ -30,6 +36,18 @@ class AstFile : public File {
             const u32 sampleCount {readBytes<4, u32, Endianness::BIG>(
                     buffer.begin() + start + 0x14)};
             //TODO: AST looping
+            if (strmMagic != 0x5354524D) {
+                message += 
+                        "WARNING: missing STRM file magic ("
+                      + std::to_string(start)
+                      + ")!\n";
+            }
+            if (start + 0x40 + dataSize > end) {
+                message += 
+                        "WARNING: data size field in header ("
+                      + std::to_string(start + 0x04)
+                      + ") is too large!\n";
+            }
 
             //Accomodate for 44-byte wav header:
             dest.end = 
@@ -71,21 +89,35 @@ class AstFile : public File {
             s64_fast samplesRemaining {sampleCount};
             while (samplesRemaining > 0) {
                 if (start + blockOffset + 0x20 > end) {
-                    return "Sample count in header is"
-                           " too high (out of space)!\n";
+                    message +=
+                            "ERROR (out of space): Sample count in header (" 
+                          + std::to_string(start + 0x14)
+                          + ") is too high!\n";
+                    return message; 
                 }
+                const u32 blckMagic {readBytes<4, u32, Endianness::BIG>(
+                        buffer.begin() + start + blockOffset)};
                 const u32 blockSize {readBytes<4, u32, Endianness::BIG>(
                         buffer.begin() + start + blockOffset + 0x04)};
+                if (blckMagic != 0x424C434B) {
+                    message += 
+                            "WARNING: missing BLCK magic ("
+                          + std::to_string(start + blockOffset)
+                          + ")!\n";
+                }
                 if (
                         start 
                       + blockOffset 
                       + 0x20 
                       + blockSize * channelCount 
                       > end) {
-                    return 
-                            std::string("Block size ") 
+                    message += 
+                            "ERROR (out of space): Block size " 
                           + std::to_string(blockSize) 
-                          + std::string(" is too large (out of space)!\n");
+                          + " ("
+                          + std::to_string(start + blockOffset + 0x04)
+                          + ") is too large!\n";
+                    return message;
                 }
                 if (isPcm) {
                     //Advance beyond BLCK header: 
@@ -190,7 +222,14 @@ class AstFile : public File {
                 }
                 blockOffset += blockSize * channelCount;
             }
-            return "";
+            if (blockOffset > dataSize + 0x40) {
+                message += 
+                        "WARNING: data size field in header ("
+                      + std::to_string(start + 0x04)
+                      + ") is too small!\n";
+            }  
+
+            return message;
         }
 
         std::string fromWav(const File& source) override {
