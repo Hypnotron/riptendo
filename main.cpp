@@ -9,7 +9,7 @@
 void printUsageAndExit(const char* const executable) {
     std::cerr 
             << "usage: " << executable << " <format> [decode|encode]"
-            << " <input-file> <output-file>\n"; 
+            << " <input-file> <output-file> (option1) (option2) ...\n"; 
     exit(1);
 }
 
@@ -44,11 +44,27 @@ int main(int argc, char* argv[]) {
     //Construct Nintendo file:
     if (!std::strcmp(argv[1], "ast")) {
         nintendoFile = new AstFile(nintendoFilename);
+        if (!decoding) {
+            if (argc < 8) {
+                std::cerr 
+                        << "usage: " << argv[0] << " ast " << argv[2]
+                        << " " << argv[3] << " " << argv[4] << " <codec>"
+                        << " <loop start> <loop end>\n";
+                exit(1);
+            }
+            dynamic_cast<AstFile*>(nintendoFile)->encoderProperties
+                .codec = std::strtoll(argv[5], 0, 0);
+            dynamic_cast<AstFile*>(nintendoFile)->encoderProperties
+                .loopStart = std::strtoll(argv[6], 0, 0);
+            dynamic_cast<AstFile*>(nintendoFile)->encoderProperties
+                .loopEnd = std::strtoll(argv[7], 0, 0);
+        }
     }
     else {
         std::cerr << "unsupported format " << argv[1] << '\n'; 
         exit(2);
     }
+
 
     //Perform conversion and flush:
     if (decoding) {

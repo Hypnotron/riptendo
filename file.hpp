@@ -20,7 +20,7 @@ class File {
             auto start {file.tellg()};
             file.seekg(0, std::ios_base::end);
             buffer.resize(file.tellg() - start);
-            end = buffer.size() + 1;
+            end = buffer.size();
 
             file.seekg(0, std::ios_base::beg);
             file.read(reinterpret_cast<char*>(buffer.data()), buffer.size());

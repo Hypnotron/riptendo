@@ -6,7 +6,7 @@ class WavFile : public File {
 
     public:
         WavFile() {}
-        WavFile(std::string filename)
+        WavFile(const std::string& filename)
               : File(filename) {
         }
 

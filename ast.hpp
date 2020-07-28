@@ -9,16 +9,23 @@ class AstFile : public File {
     private:
 
     public:
+        struct {
+            u16 codec {1};
+            u32 loopStart {0};
+            u32 loopEnd {0};
+        } encoderProperties;
+
         AstFile() {}
-        AstFile(std::string filename)
+        AstFile(const std::string& filename)
               : File(filename) {
         }
 
         std::string toWav(File& dest) const override {
+            //TODO: downmix to 16-bit
             std::string message {""};
 
             if (start + 0x40 > end) {
-                message += "ERROR (out of space): Missing AST header!\n";
+                message += "ERROR (out of space): missing AST header!\n";
                 return message;
             }
             const u32 strmMagic {readBytes<4, u32, Endianness::BIG>(
@@ -38,13 +45,13 @@ class AstFile : public File {
             //TODO: AST looping
             if (strmMagic != 0x5354524D) {
                 message += 
-                        "WARNING: missing STRM file magic ("
+                        "WARNING: missing STRM file magic (@"
                       + std::to_string(start)
                       + ")!\n";
             }
             if (start + 0x40 + dataSize > end) {
                 message += 
-                        "WARNING: data size field in header ("
+                        "WARNING: data size field in header (@"
                       + std::to_string(start + 0x04)
                       + ") is too large!\n";
             }
@@ -59,7 +66,7 @@ class AstFile : public File {
                     dest.buffer.begin() + dest.start};
             //                                       R I F F
             writeBytes<4, Endianness::BIG>(output, 0x52494646); output += 4;
-            writeBytes<4>(output, dest.end - 8);      output += 4;
+            writeBytes<4>(output, dest.end - dest.start - 8);   output += 4;
             //                                       W A V E
             writeBytes<4, Endianness::BIG>(output, 0x57415645); output += 4;
             //                                       f m t <space>
@@ -79,7 +86,7 @@ class AstFile : public File {
             writeBytes<2>(output, bitDepth);                    output += 2;
             //                                       d a t a
             writeBytes<4, Endianness::BIG>(output, 0x64617461); output += 4;
-            writeBytes<4>(output, dest.end - 0x2C);   output += 4;
+            writeBytes<4>(output, dest.end - dest.start - 0x2C);output += 4;
 
             std::vector<s16> history1(channelCount, 0);
             std::vector<s16> history2(channelCount, 0);
@@ -90,7 +97,7 @@ class AstFile : public File {
             while (samplesRemaining > 0) {
                 if (start + blockOffset + 0x20 > end) {
                     message +=
-                            "ERROR (out of space): Sample count in header (" 
+                            "ERROR (out of space): sample count in header (@" 
                           + std::to_string(start + 0x14)
                           + ") is too high!\n";
                     return message; 
@@ -101,7 +108,7 @@ class AstFile : public File {
                         buffer.begin() + start + blockOffset + 0x04)};
                 if (blckMagic != 0x424C434B) {
                     message += 
-                            "WARNING: missing BLCK magic ("
+                            "WARNING: missing BLCK magic (@"
                           + std::to_string(start + blockOffset)
                           + ")!\n";
                 }
@@ -112,9 +119,9 @@ class AstFile : public File {
                       + blockSize * channelCount 
                       > end) {
                     message += 
-                            "ERROR (out of space): Block size " 
+                            "ERROR (out of space): block size " 
                           + std::to_string(blockSize) 
-                          + " ("
+                          + " (@"
                           + std::to_string(start + blockOffset + 0x04)
                           + ") is too large!\n";
                     return message;
@@ -198,7 +205,7 @@ class AstFile : public File {
                             for (
                                     u16 channelIndex {0};
                                     channelIndex < channelCount;
-                                    ++channelIndex) {
+                                    ++channelIndex, output += 2) {
                                 writeBytes<2>(
                                         output,
                                         dspAdpcm::toLpcm(
@@ -215,7 +222,6 @@ class AstFile : public File {
                                                 scales[channelIndex],
                                                 history1[channelIndex],
                                                 history2[channelIndex]));
-                                output += 2; 
                             }
                         }
                     }
@@ -224,16 +230,236 @@ class AstFile : public File {
             }
             if (blockOffset > dataSize + 0x40) {
                 message += 
-                        "WARNING: data size field in header ("
+                        "WARNING: data size field in header (@"
                       + std::to_string(start + 0x04)
                       + ") is too small!\n";
             }  
-
+            if (start + blockOffset < end) {
+                message +=
+                        "WARNING: skipped the final "
+                      + std::to_string(end - blockOffset)
+                      + " bytes (sample count (@"
+                      + std::to_string(start + 0x14)
+                      + ") may be too low)!\n";
+            }
             return message;
         }
-
         std::string fromWav(const File& source) override {
-            //TODO: conversion from wav
-            return "";
+            std::string message {""};
+                
+            if (source.start + 0x2C > source.end) {
+                message += "ERROR (out of space): missing WAV header!\n";
+                return message;
+            }
+            const u32 riffMagic {readBytes<4, u32, Endianness::BIG>(
+                    source.buffer.begin() + source.start)};
+            const u32 chunkSize {readBytes<4, u32>(
+                    source.buffer.begin() + source.start + 0x04)};
+            const u32 waveMagic {readBytes<4, u32, Endianness::BIG>(
+                    source.buffer.begin() + source.start + 0x08)};
+            const u32 fmtMagic {readBytes<4, u32, Endianness::BIG>(
+                    source.buffer.begin() + source.start + 0x0C)};
+            const u32 subchunk1Size {readBytes<4, u32>(
+                    source.buffer.begin() + source.start + 0x10)};
+            const u16 format {readBytes<2, u16>(
+                    source.buffer.begin() + source.start + 0x14)};
+            const u16 channelCount {readBytes<2, u16>(
+                    source.buffer.begin() + source.start + 0x16)};
+            const u32 sampleRate {readBytes<4, u32>(
+                    source.buffer.begin() + source.start + 0x18)};
+            const u32 byteRate {readBytes<4, u32>(
+                    source.buffer.begin() + source.start + 0x1C)};
+            const u16 frameSize {readBytes<2, u16>(
+                    source.buffer.begin() + source.start + 0x20)};
+            const u16 bitDepth {readBytes<2, u16>(
+                    source.buffer.begin() + source.start + 0x22)};
+            const u32 dataMagic {readBytes<4, u32, Endianness::BIG>(
+                    source.buffer.begin() + source.start + 0x24)};
+            const u32 dataSize {readBytes<4, u32>(
+                    source.buffer.begin() + source.start + 0x28)};
+            if (riffMagic != 0x52494646) {
+                message += 
+                        "WARNING: missing RIFF magic (@"
+                      + std::to_string(source.start)
+                      + ")!\n";
+            }
+            if (waveMagic != 0x57415645) {
+                message +=
+                        "WARNING: missing WAVE magic (@"
+                      + std::to_string(source.start + 0x08)
+                      + ")!\n";
+            }
+            if (fmtMagic != 0x666D7420) {
+                message +=
+                        "WARNING: missing 'fmt ' magic (@"
+                      + std::to_string(source.start + 0x0C)
+                      + ")!\n";
+            }
+            if (dataMagic != 0x64617461) {
+                message +=
+                        "WARNING: missing data magic (@"
+                      + std::to_string(source.start + 0x24)
+                      + ")!\n";
+            }
+            if (subchunk1Size != 16) {
+                message +=
+                        "WARNING: subchunk 1 size (@"
+                      + std::to_string(source.start + 0x10)
+                      + ") is not 16!\n";
+            }
+            if (format != 1) {
+                message +=
+                        "WARNING: format (@"
+                      + std::to_string(source.start + 0x14)
+                      + ") is not 1 (LPCM)!\n";
+            }
+            if (frameSize != (bitDepth / 8) * channelCount) {
+                message +=
+                        "WARNING: frame size field (@"
+                      + std::to_string(source.start + 0x20)
+                      + ") is misconfigured!\n";
+            }
+            if (byteRate != sampleRate * frameSize) {
+                message +=
+                        "WARNING: byte rate field (@"
+                      + std::to_string(source.start + 0x1C)
+                      + ") is misconfigured!\n";
+            }
+            if (chunkSize - 0x24 != dataSize) {
+                message +=
+                        "WARNING: mismatched chunk size (@"
+                      + std::to_string(source.start + 0x04)
+                      + ") and data size (@"
+                      + std::to_string(source.start + 0x28)
+                      + ")!\n"; 
+            }
+            if (bitDepth != 16) {
+                message +=
+                        "WARNING: bit depth (@"
+                      + std::to_string(source.start + 0x22)
+                      + ") is not 16!\n";
+            }
+
+            end =
+                    (start
+                  + 0x40
+                  //size of BLCK headers:
+                  + (dataSize / (10080 * channelCount) + 1) * 0x20
+                  + dataSize
+                  //pad to nearest multiple of 32:
+                  + 0x1F) & ~(0x1F);
+            buffer.resize(std::max(buffer.size(), end));
+            std::vector<u8>::iterator output {buffer.begin() + start};
+
+            //                                       S T R M
+            writeBytes<4, Endianness::BIG>(output, 0x5354524D); output += 4;
+            writeBytes<4, Endianness::BIG>(
+                    output, 
+                    end - start - 0x40);                        output += 4;
+            writeBytes<2, Endianness::BIG>(
+                    output, 
+                    encoderProperties.codec);                   output += 2;
+            writeBytes<2, Endianness::BIG>(
+                    output, 
+                    bitDepth);                                  output += 2;
+            writeBytes<2, Endianness::BIG>(
+                    output, 
+                    channelCount);                              output += 2;
+            //unknown:
+            writeBytes<2, Endianness::BIG>(output, 0xFFFF);     output += 2;
+            writeBytes<4, Endianness::BIG>(output, sampleRate); output += 4;
+            writeBytes<4, Endianness::BIG>(
+                    output, 
+                    dataSize / frameSize);                      output += 4;
+            writeBytes<4, Endianness::BIG>(
+                    output, 
+                    encoderProperties.loopStart);               output += 4;
+            writeBytes<4, Endianness::BIG>(
+                    output, 
+                    encoderProperties.loopEnd);                 output += 4;
+            writeBytes<4, Endianness::BIG>(
+                    output,
+                    dataSize / channelCount < 10080
+                  ? dataSize / channelCount
+                  : 10080);                                     output += 4;
+            //unknown:
+            writeBytes<4, Endianness::BIG>(output, 0);          output += 4;
+            //unknown:
+            writeBytes<4, Endianness::BIG>(output, 0x7F000000); output += 4;
+            //unknown:
+            for (u8_fast i {0x14}; i > 0; --i) {
+                *output++ = 0;
+            }
+
+            //Advance beyond main (STRM) header:
+            u32_fast wavBlockOffset {0x2C};
+            for (
+                    s64_fast blocksRemaining {
+                            dataSize / (10080 * channelCount) + 1};
+                    blocksRemaining > 0 
+                 && source.start + wavBlockOffset < source.end;
+                    --blocksRemaining) {
+                const u32 blockSize {
+                        blocksRemaining == 1
+                      ? ((dataSize / channelCount) % 10080 + 0x1F) & ~(0x1F) 
+                      : 10080};
+                writeBytes<4, Endianness::BIG>(
+                        output, 
+                        0x424C434B);                            output += 4; 
+                writeBytes<4, Endianness::BIG>(
+                        output,
+                        blockSize);                             output += 4;
+                for (u8_fast i {0x18}; i > 0; --i) {
+                    *output++ = 0;
+                }
+                for (
+                        u16 channelIndex {0};
+                        channelIndex < channelCount;
+                        ++channelIndex) {
+                    switch (encoderProperties.codec) {
+                    //AFC ADPCM:
+                    case 0:
+                        //TODO: AST AFC ADPCM encoding
+                    break;
+
+                    //LPCM:
+                    case 1:
+                        for (
+                                u32 wavSampleOffset =
+                                        channelIndex 
+                                      * (bitDepth / 8);
+                                wavSampleOffset < blockSize * channelCount;
+                                wavSampleOffset += 
+                                        channelCount
+                                      * (bitDepth / 8),
+                                output += 2) {
+                            writeBytes<2, Endianness::BIG>(
+                                    output,
+                                    source.start 
+                                  + wavBlockOffset 
+                                  + wavSampleOffset
+                                  < source.end
+                                  ? readBytes<u64>(
+                                            bitDepth / 8,
+                                            Endianness::LITTLE,
+                                            source.buffer.begin()
+                                          + source.start
+                                          + wavBlockOffset
+                                          + wavSampleOffset)
+                                  : 0);
+                        }
+                    break;
+
+                    default:
+                        message += 
+                                "ERROR: unknown codec type "
+                              + std::to_string(encoderProperties.codec)
+                              + "!\n";
+                        return message;
+                    }
+                }
+                wavBlockOffset += blockSize * channelCount;
+            }
+            return message; 
         }
 };
