@@ -5,7 +5,12 @@ project(riptendo
         LANGUAGES CXX)
 
 add_executable(riptendo
-        main.cpp)
+        main.cpp
+        ast.hpp
+        byte.hpp
+        dsp-adpcm.hpp
+        file.hpp
+        wav.hpp)
 target_compile_features(riptendo
         PUBLIC cxx_std_11)
 set_target_properties(riptendo PROPERTIES
