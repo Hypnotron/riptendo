@@ -19,5 +19,4 @@ set_target_properties(riptendo PROPERTIES
 install(
         TARGETS riptendo
         RUNTIME
-        DESTINATION /usr/bin
-        CONFIGURATIONS Debug Release)
+        DESTINATION bin)
