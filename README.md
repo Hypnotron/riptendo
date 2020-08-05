@@ -10,8 +10,7 @@ A C++11 program for ripping Nintendo audio
 #### Requirements
 + CMake 3.8.2+
 + A C++11 capable compiler
-
-
+######
     mkdir build && cd build
     cmake ..
         -DCMAKE_BUILD_TYPE=Release \
