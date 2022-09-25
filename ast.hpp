@@ -1,4 +1,6 @@
 #pragma once
+#include <array>
+#include <cmath>
 #include <string>
 #include <vector>
 #include "byte.hpp"
@@ -15,6 +17,12 @@ class AstFile : public File {
             u32 loopStart {0};
             u32 loopEnd {0};
         } encoderProperties;
+        struct properties {
+            static constexpr std::array<u32, 2> bytesPerFrame {
+                9, 2};
+            static constexpr std::array<u32, 2> wavSamplesPerFrame {
+                16, 1};
+        };
 
         AstFile() {}
         AstFile(const std::string& filename)
@@ -33,8 +41,8 @@ class AstFile : public File {
                     buffer.begin() + start)};
             const u32 dataSize {readBytes<4, u32, Endianness::BIG>(
                     buffer.begin() + start + 0x04)};
-            const bool isPcm = readBytes<2, u16, Endianness::BIG>(
-                    buffer.begin() + start + 0x08); 
+            const u16 codec {readBytes<2, u16, Endianness::BIG>(
+                    buffer.begin() + start + 0x08)};
             const u16 bitDepth {readBytes<2, u16, Endianness::BIG>(
                     buffer.begin() + start + 0x0A)};
             const u16 channelCount {readBytes<2, u16, Endianness::BIG>(
@@ -127,7 +135,8 @@ class AstFile : public File {
                           + ") is too large!\n";
                     return message;
                 }
-                if (isPcm) {
+                //LPCM:
+                if (codec == 1) {
                     //Advance beyond BLCK header: 
                     blockOffset += 0x20;
                     for (
@@ -154,27 +163,8 @@ class AstFile : public File {
                         }
                     }
                 }
+                //AFC ADPCM:
                 else {
-                    for (
-                            u16 channelIndex {0};
-                            channelIndex < channelCount;
-                            ++channelIndex) {
-                        //TODO: determine actual history sample order 
-                        /*
-                        history2[channelIndex] = toSigned(readBytes<
-                                2, 
-                                u16,
-                                Endianness::BIG>(
-                                buffer.begin() + start + blockOffset + 0x08
-                              + channelIndex * 0x04));
-                        history1[channelIndex] = toSigned(readBytes<
-                                2, 
-                                u16,
-                                Endianness::BIG>(
-                                buffer.begin() + start + blockOffset + 0x08
-                              + channelIndex * 0x04 + 0x02));
-                        */
-                    }
                     //Advance beyond BLCK header: 
                     blockOffset += 0x20;
                     for (
@@ -209,7 +199,7 @@ class AstFile : public File {
                                     ++channelIndex, output += 2) {
                                 writeBytes<2>(
                                         output,
-                                        dspAdpcm::toLpcm(
+                                        dspAdpcm::sampleToLpcm(
                                                 buffer.begin()
                                               + start
                                               + blockOffset
@@ -221,6 +211,7 @@ class AstFile : public File {
                                                         .begin(),
                                                 predictors[channelIndex],
                                                 scales[channelIndex],
+                                                true,
                                                 history1[channelIndex],
                                                 history2[channelIndex]));
                             }
@@ -257,11 +248,15 @@ class AstFile : public File {
                     source.start, 
                     message)};
             end =
-                    (start
+                    static_cast<size_t>(start
                   + 0x40
                   //size of BLCK headers:
-                  + (info.dataSize / (10080 * info.channelCount) + 1) * 0x20
-                  + info.dataSize
+                  + std::ceil(info.dataSize / (10080.0 * info.channelCount))
+                  * 0x20
+                  + (info.dataSize
+                  / (info.bitDepth / 8)
+                  / properties::wavSamplesPerFrame[encoderProperties.codec])
+                  * properties::bytesPerFrame[encoderProperties.codec]
                   //pad to nearest multiple of 32:
                   + 0x1F) & ~(0x1F);
             buffer.resize(std::max(buffer.size(), end));
@@ -309,25 +304,41 @@ class AstFile : public File {
                 *output++ = 0;
             }
 
+            std::vector<s16> history1(info.channelCount, 0);
+            std::vector<s16> history2(info.channelCount, 0);
+
             //Advance beyond main (STRM) header:
             u32_fast wavBlockOffset {0x2C};
             for (
-                    s64_fast blocksRemaining {
-                            info.dataSize / (10080 * info.channelCount) + 1};
+                    s64_fast blocksRemaining = std::ceil(
+                            (info.dataSize
+                          / (info.bitDepth / 8)
+                          / properties::wavSamplesPerFrame[
+                                    encoderProperties.codec])
+                          * properties::bytesPerFrame[
+                                    encoderProperties.codec]
+                          / (10080.0 * info.channelCount));
                     blocksRemaining > 0 
                  && source.start + wavBlockOffset < source.end;
                     --blocksRemaining) {
-                const u32 blockSize {
+                const u32 blockSize =
                         blocksRemaining == 1
-                      ? ((info.dataSize / info.channelCount) % 10080 + 0x1F) 
-                      & ~(0x1F) 
-                      : 10080};
+                      ? std::ceil((((info.dataSize
+                      / (info.bitDepth / 8)
+                      / properties::wavSamplesPerFrame[
+                                encoderProperties.codec])
+                      * properties::bytesPerFrame[
+                                encoderProperties.codec]
+                      / info.channelCount) % 10080) / 288.0) * 288
+                      : 10080;
                 writeBytes<4, Endianness::BIG>(
                         output, 
+                        //B L C K
                         0x424C434B);                            output += 4; 
                 writeBytes<4, Endianness::BIG>(
                         output,
                         blockSize);                             output += 4;
+                std::vector<u8>::iterator historyOutput {output};
                 for (u8_fast i {0x18}; i > 0; --i) {
                     *output++ = 0;
                 }
@@ -338,7 +349,36 @@ class AstFile : public File {
                     switch (encoderProperties.codec) {
                     //AFC ADPCM:
                     case 0:
-                        //TODO: AST AFC ADPCM encoding
+                        for (
+                                u32 wavSampleOffset =
+                                        channelIndex
+                                      * (info.bitDepth / 8);
+                                wavSampleOffset <
+                                        blockSize
+                                      / properties::bytesPerFrame[
+                                        encoderProperties.codec]
+                                      * properties::wavSamplesPerFrame[
+                                        encoderProperties.codec]
+                                      * info.channelCount
+                                      * (info.bitDepth / 8); ) {
+                            std::array<s16, 16> lpcmFrame;
+                            for (s16& lpcmSample : lpcmFrame) {
+                                lpcmSample = toSigned(readBytes<2, u16>(
+                                        source.buffer.begin()
+                                      + source.start
+                                      + wavBlockOffset
+                                      + wavSampleOffset));
+                                wavSampleOffset +=
+                                        info.channelCount
+                                      * (info.bitDepth / 8);
+                            }
+                            dspAdpcm::blockFromLpcm(
+                                    lpcmFrame.begin(),
+                                    output,
+                                    dspAdpcm::afcCoefficients,
+                                    history1[channelIndex],
+                                    history2[channelIndex]);
+                        }
                     break;
 
                     //LPCM:
@@ -348,8 +388,13 @@ class AstFile : public File {
                                         channelIndex 
                                       * (info.bitDepth / 8);
                                 wavSampleOffset < 
-                                        blockSize 
-                                      * info.channelCount;
+                                        blockSize
+                                      / properties::bytesPerFrame[
+                                        encoderProperties.codec]
+                                      * properties::wavSamplesPerFrame[
+                                        encoderProperties.codec]
+                                      * info.channelCount
+                                      * (info.bitDepth / 8);
                                 wavSampleOffset += 
                                         info.channelCount
                                       * (info.bitDepth / 8),
@@ -379,7 +424,25 @@ class AstFile : public File {
                         return message;
                     }
                 }
-                wavBlockOffset += blockSize * info.channelCount;
+                for (
+                        u16_fast channelIndex {0};
+                        channelIndex < info.channelCount;
+                        ++channelIndex) {
+                    writeBytes<2, Endianness::BIG>(
+                            historyOutput,
+                            history1[channelIndex]);    historyOutput += 2;
+                    writeBytes<2, Endianness::BIG>(
+                            historyOutput,
+                            history2[channelIndex]);    historyOutput += 2;
+                }
+                wavBlockOffset +=
+                        blockSize
+                      / properties::bytesPerFrame[
+                        encoderProperties.codec]
+                      * properties::wavSamplesPerFrame[
+                        encoderProperties.codec]
+                      * info.channelCount
+                      * (info.bitDepth / 8);
             }
             return message; 
         }
