@@ -131,7 +131,7 @@ namespace dspAdpcm {
                     history1,
                     history2)};
             //Update history samples:
-            static_cast<void>(sampleToLpcm(
+            sampleToLpcm(
                     &adpcmSample,
                     false,
                     coefficients,
@@ -139,7 +139,7 @@ namespace dspAdpcm {
                     bestScale,
                     true,
                     history1,
-                    history2));
+                    history2);
             if (writeTopNibble) {
                 *output = adpcmSample << 4;
             }
